@@ -5,7 +5,7 @@ package com.jack.paytracker.handler;
  * @autor Jack Malik - Primechannel Corporation Ltd.
  *******************************************************************************/
 
-import com.jack.paytracker.db.DbConnection;
+import com.jack.paytracker.db.DbConnectionPool;
 import com.jack.paytracker.PayTracker;
 import com.jack.paytracker.model.Payer;
 import io.muserver.MuRequest;
@@ -24,15 +24,15 @@ import java.util.Map;
 public class PayerHandler extends GenericPayTrackerHandler {
 
     public PayerHandler(final PayTracker tracker) {
-        registerServer(tracker);
+        registerTracker(tracker);
     }
 
     public void handle(MuRequest request, MuResponse response, Map<String,String> pathParams) throws Exception {
 
         List<Payer> payerList = new ArrayList<>();
 
-        try (Connection connection = DbConnection.create()) {
-            try (PreparedStatement statement = connection.prepareStatement(Payer.PAYER_QUERY_ALL_SQL)) {
+        try (DbConnectionPool.DbConnection connection = DbConnectionPool.get()) {
+            try (PreparedStatement statement = connection.get().prepareStatement(Payer.PAYER_QUERY_ALL_SQL)) {
                 try (ResultSet resultSet = statement.executeQuery()) {
                     while (resultSet.next()) {
                         Payer payer = new Payer();

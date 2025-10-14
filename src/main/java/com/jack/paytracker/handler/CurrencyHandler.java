@@ -6,7 +6,7 @@ package com.jack.paytracker.handler;
  *******************************************************************************/
 
 import com.jack.paytracker.PayTracker;
-import com.jack.paytracker.db.DbConnection;
+import com.jack.paytracker.db.DbConnectionPool;
 import com.jack.paytracker.model.Currency;
 import io.muserver.MuRequest;
 import io.muserver.MuResponse;
@@ -14,9 +14,9 @@ import io.muserver.MuResponse;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -24,13 +24,13 @@ import java.util.Map;
 public class CurrencyHandler extends GenericPayTrackerHandler {
 
     public CurrencyHandler(final PayTracker tracker) {
-        registerServer(tracker);
+        registerTracker(tracker);
     }
 
     public void handle(MuRequest request, MuResponse response, Map<String,String> pathParams) throws Exception {
         List<Currency> ccyList = new ArrayList<>();
-        try (Connection connection = DbConnection.create()) {
-            try (PreparedStatement statement = connection.prepareStatement(Currency.CURRENCY_QUERY_ALL_SQL)) {
+        try (DbConnectionPool.DbConnection connection = DbConnectionPool.get()) {
+            try (PreparedStatement statement = connection.get().prepareStatement(Currency.CURRENCY_QUERY_ALL_SQL)) {
                 try (ResultSet resultSet = statement.executeQuery()) {
                     while (resultSet.next()) {
                         Currency ccy = new Currency();

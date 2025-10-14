@@ -1,3 +1,36 @@
+<configuration scan="true">
+    <property name="LOG_DIR" value="log"/>
+
+    <!--Loggers-->
+    <logger name="PayTracker" level="INFO"/>
+
+    <appender name="FILE_ROLLER" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/PayTracker.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>PayTracker.%d{yyyy-mm-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+
+        <encoder>
+            <pattern>[%d{HH:mm:ss.SSS}][%thread][%-5level]: %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!--Appenders-->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>[%d{HH:mm:ss.SSS}][%thread][%-5level]: %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!--Root logger-->
+    <root level="info">
+        <appender-ref ref="STDOUT"/>
+        <appender-ref ref="FILE_ROLLER"/>
+    </root>
+
+</configuration>
+<!--
 <configuration>
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
@@ -9,3 +42,4 @@
         <appender-ref ref="STDOUT" />
     </root>
 </configuration>
+-->

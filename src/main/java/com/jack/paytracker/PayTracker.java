@@ -6,18 +6,22 @@ package com.jack.paytracker;
  *******************************************************************************/
 
 import java.sql.SQLException;
-import java.sql.Connection;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.Collections;
 import java.util.concurrent.*;
+import java.util.Properties;
+import java.io.IOException;
+import java.io.InputStream;
 
 import io.muserver.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 
 import org.h2.tools.Server;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /*
  * import all type-based handlers used
@@ -35,33 +39,57 @@ public class PayTracker {
      * Server configuration values - should move to config file
      */
     public static final int MAX_MUSERVER_INSTANCES_SIZE = 2;
-    public static final int SERVER_THREAD_POOL_SIZE = 8;
+
+    public static final String SERVER_THREAD_POOL_SIZE_STR = "executor.pool.size";
     public static final int MAX_PAYMENT_TRACKING_TIME_IN_MILIS = 1800000;
     public static final int REFRESH_TIME_IN_MILLIS = 60000; // refresh every minute as per the spec
     public static final int DEFAULT_MU_SERVER_PORT_NUMBER = 51234;
     public enum Status { RUNNABLE, RUNNING, TERMINATED };
 
+    private final static Logger logger = LoggerFactory.getLogger(PayTracker.class);
+
     /**
      * PayTracker implementation servers
      */
-    public static volatile MuServerBuilder webServerImpl;
-    public static volatile Server dbServerImpl;
+    private static volatile MuServerBuilder webServerImpl;
+    private static volatile Server dbServerImpl;
     public static final ObjectMapper webObjectMapper = new ObjectMapper();
     public PayTracker.Status status = Status.RUNNABLE;
 
-    /**
-     * Db master connections and caches - master connection implemented for recovery
-     * purposes if needed. PayTracker connection pool implemented in DbConnection.
-     */
-    protected Connection dbMasterConnection = DbHelper.connect();
-    private LinkedBlockingDeque<Connection> dbConnectionPool =
-            new LinkedBlockingDeque<>(SERVER_THREAD_POOL_SIZE);
-    public LinkedBlockingDeque<MuServer> muServerPool =
+    private LinkedBlockingDeque<MuServer> muServerPool =
             new LinkedBlockingDeque<>(MAX_MUSERVER_INSTANCES_SIZE);
     public Map<String, Double> aggregatedPaymentCache =
             Collections.synchronizedMap(new HashMap<String, Double>());
     public HashMap<String, Integer> currencyName2IdCache;
     public HashMap<String, Integer> clientName2IdCache;
+
+    private static final Properties properties = new Properties();
+
+    private static void loadPropertiesFromConfigFile() {
+
+        if (PayTracker.properties.size() == 0) {
+            try (InputStream stream = PayTracker.class
+                    .getClassLoader()
+                    .getResourceAsStream("application.properties")) {
+                if (stream == null) {
+                    throw new RuntimeException("Unable to find application.properties file.");
+                }
+                PayTracker.properties.load(stream);
+            } catch (IOException e) {
+                System.out.println("Unexpected exception while processing PayTracker properties.");
+                throw new RuntimeException(e);
+            }
+        }
+    };
+
+    public static String property(final String name) {
+
+        if (properties.size() == 0) {
+            loadPropertiesFromConfigFile();
+        }
+        String fullName = PayTracker.class.getSimpleName() + "." + name;
+        return (String)PayTracker.properties.getOrDefault(fullName.toLowerCase(),"");
+    }
 
     /**
      * @return integer value of total client connections used by the MuServer
@@ -80,11 +108,15 @@ public class PayTracker {
         module.addDeserializer(LocalDateTime.class, new LocalDateTimeDeserializer());
         PayTracker.webObjectMapper.registerModule(module);
 
-        if (!initialize()) {
-            System.out.println("Failed to initialize PayTracker .. ");
-            throw new RuntimeException("Failed to initialize PayTracker.");
+        try (InputStream stream = PayTracker.class.getClassLoader().getResourceAsStream("application.properties")) {
+            if (stream == null) {
+                throw new RuntimeException("Unable to find application.properties file.");
+            }
+            properties.load(stream);
+        } catch (IOException e) {
+            System.out.println("Unexpected exception while processing PayTracker properties.");
+            throw new RuntimeException(e);
         }
-        System.out.println("PayTracker successfully initialized .. ");
     };
 
     /**
@@ -93,15 +125,14 @@ public class PayTracker {
     public void terminate() {
         synchronized (this) {
             try {
-                if (!this.dbMasterConnection.isClosed()) {
-                    this.dbMasterConnection.close();
-                }
                 PayTracker.dbServerImpl.stop();
-                PayTracker.webServerImpl.executor().close();
+                if (!PayTracker.webServerImpl.executor().isTerminated())
+                    PayTracker.webServerImpl.executor().shutdown();
             } catch (Exception e) {
-                System.out.println("Failed to terminate cleanly: ['" + e.getMessage() + "']. Aborting.");
+                logger.error("Failed to terminate cleanly: ['" + e.getMessage() + "']. Aborting.");
             } finally {
-                this.status = Status.TERMINATED;
+                this.status = status.TERMINATED;
+                logger.debug("Changing PayTracker status to 'TERMINATED' ..");
             }
         }
     }
@@ -122,11 +153,9 @@ public class PayTracker {
         Server dbWebServer = null;
         try {
             dbWebServer = Server.createWebServer("-web").start();
-            System.out.println("H2 Database console started. Login at: " + dbWebServer.getURL());
+            logger.info("H2 Database console started. Login at: " + dbWebServer.getURL());
         } catch (SQLException e) {
-            e.printStackTrace();
-            System.out.println("Unexpected exception: ['" + e.getMessage() + "']. Aborting.");
-            throw new RuntimeException("Failed to initialize H2 Database.");
+            throw new RuntimeException("Failed to start H2 database console web server ..");
         }
         return dbWebServer;
     }
@@ -144,25 +173,24 @@ public class PayTracker {
         synchronized (this) {
             MuServerBuilder muServerBuilder = null;
             try {
-                if (Status.RUNNABLE == this.status) {
+                if (status.RUNNABLE == this.status) {
                     // create builder - start server instance
                     muServerBuilder = PayTracker.MuServerBuilderInstance(executor);
                     registerHandlers(muServerBuilder);
                     MuServer muServer = muServerBuilder.start();
                     muServerPool.add(muServer);
-                    System.out.println("MuServer started successfully at ['" + muServer.uri() + "']");
-                    this.status = Status.RUNNING;
+                    logger.info("MuServer started successfully at ['" + muServer.uri() + "']");
+                    this.status = status.RUNNING;
                 } else {
-                    if (Status.RUNNING == this.status) {
-                        System.out.println("MuServer already running.");
+                    if (status.RUNNING == this.status) {
+                        logger.warn("Attempted to start PayTracker. Application already running.");
                         muServerBuilder = PayTracker.webServerImpl;
                     } else {
                         throw new RuntimeException("Failed to start MuServer. Already terminated.");
                     }
                 }
             } catch (Exception ex) {
-                System.out.println("Unexpected exception from MuServer: ['" + ex.getMessage() + "']");
-                throw new RuntimeException("Failed to start MuServer.");
+                throw new RuntimeException("Unexpected exception from MuServer: ['" + ex.getMessage() + "']");
             }
             return muServerBuilder;
         }
@@ -174,15 +202,16 @@ public class PayTracker {
      */
     protected boolean startServers() {
         try {
-            PayTracker.webServerImpl = startMuServer(Executors.newFixedThreadPool(PayTracker.SERVER_THREAD_POOL_SIZE));
+            int execThreadPoolSize = Integer.parseInt(PayTracker.property(PayTracker.SERVER_THREAD_POOL_SIZE_STR));
+            PayTracker.webServerImpl = startMuServer(Executors.newFixedThreadPool(execThreadPoolSize));
         } catch (Exception ex) {
-            System.out.println("Failed to start MuServer: ['" + ex.toString() + "']");
+            logger.error("Failed to start MuServer: ['" + ex.toString() + "']");
             return false;
         }
         try {
             PayTracker.dbServerImpl = PayTracker.startDbWebServer();
         } catch (Exception ex) {
-            System.out.println("Failed to start H2 database web server: [" + ex.toString() + "']");
+            logger.error("Failed to start H2 database web server: [" + ex.toString() + "']");
             return false;
         }
         return true;
@@ -199,22 +228,16 @@ public class PayTracker {
         Please note that the MuServerBuilder as well the org.h2.tools.Server are static objects
          */
         if (!startServers()) {
-            System.out.println("Failed to start PayTracker servers");
+            logger.error("Failed to start PayTracker servers");
             return false;
         }
 
         if (!buildCache()) {
-            System.out.println("Failed to cache PayTracker data when instantiating server");
+            logger.error("Failed to cache PayTracker data when instantiating server.");
             return false;
         }
 
-        try {
-            this.dbMasterConnection = DbHelper.connect();
-            System.out.println("Created master H2 database connection.");
-        } catch (RuntimeException ex) {
-            System.out.println("Failed to create master database connection to H2 database.");
-            return false;
-        }
+        logger.info("PayTracker successfully initialized.");
         return true;
     }
 
@@ -227,9 +250,10 @@ public class PayTracker {
             this.clientName2IdCache = DbHelper.refreshPayerCache(new HashMap<String, Integer>());
             this.currencyName2IdCache = DbHelper.refreshCurrencyCache(new HashMap<String, Integer>());
         } catch (Exception ex) {
-            System.out.println("Unexpected exception when caching Currency and Client info: ['" + ex.getMessage() + "'].");
+            logger.error("Unexpected exception when caching Currency/Client info: ['" + ex.getMessage() + "'].");
             return false;
         }
+        logger.info("Successfully built PayTracker static data caches.");
         return true;
     }
 
@@ -291,37 +315,37 @@ public class PayTracker {
         containing aggregated view of all payments grouped by currency code as per the spec
          */
         int elapsedTime = 0;
-        while (Status.RUNNING == this.status) {
+        while (status.RUNNING == this.status) {
+
             try {
-                if (!DbHelper.refreshAggregatedPaymentCache(this.aggregatedPaymentCache)) {
-                    throw new RuntimeException("Failed to refresh payment cache.");
-                }
-                System.out.println("\nAggregated Payment Report as of " + LocalDateTime.now());
-                System.out.println("-----------------------------------------------------------");
-                int counter = 0;
-                for (String ccy: this.aggregatedPaymentCache.keySet()) {
-                    counter += 1;
-                    Double amt = this.aggregatedPaymentCache.get(ccy);
-                    System.out.println("\t#" + counter + ": CURRENCY: " + ccy + " - TOTAL PAID: " + amt);
-                }
-                if (0 == counter) {
-                    System.out.println("\tCurrently no payments found");
-                }
+                DbHelper.refreshAggregatedPaymentCache(this.aggregatedPaymentCache);
+            } catch (RuntimeException ex) {
+                return false;
+            }
+
+            logger.info("Aggregated Payment Report as of " + LocalDateTime.now());
+            logger.info("-----------------------------------------------------------");
+            int counter = 0;
+            for (String ccy: this.aggregatedPaymentCache.keySet()) {
+                counter += 1;
+                Double amt = this.aggregatedPaymentCache.get(ccy);
+                logger.info("\t#" + counter + ": CURRENCY: " + ccy + " - TOTAL PAID: " + amt);
+            }
+            if (0 == counter) {
+                logger.info("\tCurrently no payments found");
+            }
+            try {
                 Thread.sleep(REFRESH_TIME_IN_MILLIS);
-                elapsedTime += REFRESH_TIME_IN_MILLIS;
-                if (elapsedTime > PayTracker.MAX_PAYMENT_TRACKING_TIME_IN_MILIS) {
-                    this.terminate();
-                }
             } catch (InterruptedException ex) {
                 // ignore
-            } catch (Exception ex) {
-                System.out.println("Unexpected exception while tracking payments: '" + ex.getMessage() + "'.");
-                return false;
+            }
+            elapsedTime += REFRESH_TIME_IN_MILLIS;
+            if (elapsedTime > PayTracker.MAX_PAYMENT_TRACKING_TIME_IN_MILIS) {
+                this.terminate();
             }
         }
         return true;
     }
-
 
     public static void main(String[] args) {
         /*
@@ -330,6 +354,9 @@ public class PayTracker {
         PayTracker tracker = null;
         try {
             tracker = new PayTracker();
+            if (!tracker.initialize()) {
+                throw new RuntimeException("Failed to initialize PayTracker.");
+            }
         } catch (Exception ex) {
             System.out.println("Failed to start application: ['" + ex.toString() + "'].");
             return;
@@ -344,6 +371,6 @@ public class PayTracker {
             return;
         }
         tracker.terminate();
-        System.out.println("PayTracker exiting .. ");
+        logger.info("PayTracker exiting .. ");
     }
 }

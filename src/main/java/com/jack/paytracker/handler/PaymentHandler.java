@@ -6,8 +6,7 @@ package com.jack.paytracker.handler;
  *******************************************************************************/
 
 import com.jack.paytracker.PayTracker;
-import com.jack.paytracker.db.DbConnection;
-import com.jack.paytracker.db.DbHelper;
+import com.jack.paytracker.db.DbConnectionPool;
 import com.jack.paytracker.model.Currency;
 import com.jack.paytracker.model.Payment;
 import io.muserver.MuRequest;
@@ -19,7 +18,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
@@ -27,7 +25,7 @@ import java.util.Map;
 public class PaymentHandler extends GenericPayTrackerHandler {
 
     public PaymentHandler(final PayTracker tracker) {
-        registerServer(tracker);
+        registerTracker(tracker);
     }
 
     /**
@@ -38,8 +36,8 @@ public class PaymentHandler extends GenericPayTrackerHandler {
     public void handle(MuRequest request, MuResponse response, Map<String,String> pathParams) throws Exception {
 
         List<Currency> ccyList = new ArrayList<>();
-        try (Connection connection = DbConnection.create()) {
-            try (PreparedStatement statement = connection.prepareStatement(Payment.PAYMENT_QUERY_ALL_SQL)) {
+        try (DbConnectionPool.DbConnection connection = DbConnectionPool.get()) {
+            try (PreparedStatement statement = connection.get().prepareStatement(Payment.PAYMENT_QUERY_ALL_SQL)) {
                 try (ResultSet resultSet = statement.executeQuery()) {
                     while (resultSet.next()) {
                         Currency ccy = new Currency();

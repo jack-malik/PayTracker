@@ -11,7 +11,7 @@ import io.muserver.*;
 public abstract class GenericPayTrackerHandler implements RouteHandler {
 
     protected PayTracker tracker;
-    protected void registerServer(PayTracker instance) {
+    protected void registerTracker(PayTracker instance) {
         this.tracker = instance;
     }
 }

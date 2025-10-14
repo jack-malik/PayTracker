@@ -10,24 +10,27 @@ import java.util.Map;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
-import java.sql.SQLException;
 
 import java.time.LocalDateTime;
-
 import javax.ws.rs.core.Response;
 
-import com.jack.paytracker.db.DbConnection;
+import com.jack.paytracker.db.DbConnectionPool;
 import com.jack.paytracker.db.DbHelper;
 import io.muserver.MuRequest;
 import io.muserver.MuResponse;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.jack.paytracker.PayTracker;
 import com.jack.paytracker.model.Payment;
 
 public class PaymentProcessorHandler extends GenericPayTrackerHandler {
 
+    private final static Logger logger = LoggerFactory.getLogger(PaymentProcessorHandler.class);
+
     public PaymentProcessorHandler(final PayTracker tracker) {
-        registerServer(tracker);
+        registerTracker(tracker);
     }
 
     /**
@@ -40,7 +43,6 @@ public class PaymentProcessorHandler extends GenericPayTrackerHandler {
          * Validates uri provided. Accepts requests of the form: /paytracker/payment/USD/100
          * but also of the more generic common form: /paytracker/payment?currency=USD&amount=100.
          */
-//        Map<String, String> params = parseParameters(request);
         if (params == null) {
             String path = (String)request.uri().getPath();
             response.contentType("text/html");
@@ -58,7 +60,7 @@ public class PaymentProcessorHandler extends GenericPayTrackerHandler {
         try {
             processPayment(params);
         } catch (Exception ex) {
-            System.out.println("Failed to handler '/payment' request");
+            logger.error("Failed to handler '/payment' request");
             response.contentType("text/html");
             response.status(Response.Status.INTERNAL_SERVER_ERROR.getStatusCode());
             response.write("<html><h1>Jack's Payment Tracker</h1><p>Message: '" + path +
@@ -67,26 +69,39 @@ public class PaymentProcessorHandler extends GenericPayTrackerHandler {
         }
 
         response.contentType("text/html");
-        StringBuffer buffer = new StringBuffer();
-        buffer.append("<html><h1>Jack's Payment Tracker</h1><p>Message: '" + path +
-                " request processed successfully.</p></html>");
-        buffer.append("<h3>Current Aggregated Payment Report</h3>");
-        buffer.append("<p>---------------------------------------------------------------</p>");
-
-        if (!DbHelper.refreshAggregatedPaymentCache(tracker.aggregatedPaymentCache)) {
-            System.out.println("Failed to refresh PayTracker payment cache while handling payment.");
+        StringBuilder buffer = new StringBuilder();
+        buffer.append("<html><h1>Jack's Payment Tracker</h1><p>Message: '")
+                .append(path)
+                .append(" request processed successfully.</p></html>")
+                .append("<h3>Current Aggregated Payment Report</h3>")
+                .append("<p>---------------------------------------------------------------</p>");
+        try {
+            DbHelper.refreshAggregatedPaymentCache(tracker.aggregatedPaymentCache);
+        } catch (RuntimeException ex) {
+            String msg = "Failed to refresh PayTracker payment cache while handling payment: [" +
+                    ex.getMessage() + "'].";
+            logger.error(msg);
+            buffer.append("msg");
+            response.write(buffer.toString());
             return;
         }
         int counter = 0;
         for (String ccy: tracker.aggregatedPaymentCache.keySet()) {
             counter += 1;
             Double amt = tracker.aggregatedPaymentCache.get(ccy);
-            buffer.append("<p>#" + counter + ": CURRENCY: " + ccy + " - TOTAL PAID: " + amt + "</p>");
+            buffer.append("<p>#")
+                    .append(counter)
+                    .append(": CURRENCY: ")
+                    .append(ccy)
+                    .append(" - TOTAL PAID: ")
+                    .append(amt)
+                    .append("</p>");
         }
         buffer.append("<p>---------------------------------------------------------------</p>");
-        buffer.append("<p><b>Total current client connections: " +
-                tracker.muServerPool.peek().activeConnections().size() + "<b></p>");
-        buffer.append("<p>---------------------------------------------------------------</p>");
+        buffer.append("<p><b>Total current client connections: ")
+                .append(tracker.totalConnections())
+                .append("<b></p>")
+                .append("<p>---------------------------------------------------------------</p>");
         response.write(buffer.toString());
     }
 
@@ -98,8 +113,8 @@ public class PaymentProcessorHandler extends GenericPayTrackerHandler {
 
         Integer ccyId = tracker.currencyName2IdCache.getOrDefault(ccy, 1);
         Integer clientId = tracker.clientName2IdCache.getOrDefault(ccyId, 1);
-        try (Connection connection = DbConnection.create()) {
-            try (PreparedStatement statement = connection.prepareStatement(Payment.SAVE_PAYMENT_SQL)) {
+        try (DbConnectionPool.DbConnection connection = DbConnectionPool.get()) {
+            try (PreparedStatement statement = connection.get().prepareStatement(Payment.SAVE_PAYMENT_SQL)) {
                 statement.setInt(1, clientId);
                 statement.setInt(2, ccyId);
 //                statement.setDouble(3, payment.getAmount());
@@ -109,5 +124,6 @@ public class PaymentProcessorHandler extends GenericPayTrackerHandler {
                 statement.executeUpdate();
             }
         }
+        logger.info("Successfully processed payment: [CCY=" + ccy + "|AMT=" + amount + "].");
     }
 }
