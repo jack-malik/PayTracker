@@ -36,3 +36,18 @@ PayTracker supports posting payments in 3 currencies: USD, CAD, GBP as defined b
 * The main loop implemented in the PayTracker.track() method will run for 30 minutes and if the app
   is not killed during that time it will gracefully exit closing all opened resources to avoid memory
   leaks.
+
+5/. H2 DATABASE
+
+PayTracker uses H2 database to store data. It creates H2 database 'paytracker.mv.db' in ${user.home}
+directory if such database does not exist. User can view the content of tables by logging to localhost:8082.
+When logging into database set:
+   5.1/. Saved Settings: Generic H2 (Embedded)
+   5.2/. Setting Name  : Generic H2 (Embedded)
+   5.3/. Driver Class  : org.h2.Driver
+   5.4/. User Name     : sa
+   5.5/. Password      : (empty)
+
+When PayTracker exists the H2 database remains on disk. When PayTracker starts again user can continue
+with all data from previous run safely stored in the existing database. PayTracker opens the existing
+database which is ready to be used.
