@@ -60,8 +60,8 @@ public class DbHelper {
                         Payment payment = new Payment();
                         payment.setId(resultSet.getInt("ID"));
                         payment.setPayerId(resultSet.getInt("PAYER_ID"));
-                        payment.setCurrency(resultSet.getString("PAY_CCY_ID"));
-                        payment.setAmount(resultSet.getInt("PAY_AMOUNT"));
+                        payment.setCurrencyId(resultSet.getInt("PAY_CCY_ID"));
+                        payment.setAmount(resultSet.getDouble("PAY_AMOUNT"));
                         paymentList.add(payment);
                     }
                 }

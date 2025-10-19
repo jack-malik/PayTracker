@@ -5,6 +5,7 @@ package com.jack.paytracker.handler;
  * @autor Jack Malik - Primechannel Corporation Ltd.
  *******************************************************************************/
 
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 
 import java.sql.Connection;
@@ -23,7 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.jack.paytracker.PayTracker;
-import com.jack.paytracker.model.Payment;
+import com.jack.paytracker.model.*;
 
 public class PaymentProcessorHandler extends GenericPayTrackerHandler {
 
@@ -60,7 +61,7 @@ public class PaymentProcessorHandler extends GenericPayTrackerHandler {
         try {
             processPayment(params);
         } catch (Exception ex) {
-            logger.error("Failed to handler '/payment' request");
+            logger.error("Failed to handle 'payment' request. Exception: [" + ex.getMessage() + "'].");
             response.contentType("text/html");
             response.status(Response.Status.INTERNAL_SERVER_ERROR.getStatusCode());
             response.write("<html><h1>Jack's Payment Tracker</h1><p>Message: '" + path +
@@ -109,21 +110,30 @@ public class PaymentProcessorHandler extends GenericPayTrackerHandler {
             throws Exception {
 
         String ccy = params.get("currency");
-        String amount = params.get("amount");
-
-        Integer ccyId = tracker.currencyName2IdCache.getOrDefault(ccy, 1);
-        Integer clientId = tracker.clientName2IdCache.getOrDefault(ccyId, 1);
+        String amountStr = params.get("amount");
+        String optionalClientName = params.get("payer");
+        Integer ccyId = tracker.currencyName2IdCache.getOrDefault(ccy, 0);
+        Integer payerId = tracker.clientName2IdCache.getOrDefault(optionalClientName, 1);
         try (DbConnectionPool.DbConnection connection = DbConnectionPool.get()) {
+            Payer payer = new Payer();
+            payer.setId(payerId);
+            payer.setName(optionalClientName);
+            Payment payment = new Payment();
+            payment.setPayerId(payerId);
+            payment.setCurrencyId(ccyId);
+            payment.setAmount(Double.parseDouble(amountStr));
+            payment.setPayTime(LocalDateTime.now());
+            //                statement.setDouble(3, payment.getAmount());
+//                statement.setTimestamp(4,
             try (PreparedStatement statement = connection.get().prepareStatement(Payment.SAVE_PAYMENT_SQL)) {
-                statement.setInt(1, clientId);
+                statement.setInt(1, payerId);
                 statement.setInt(2, ccyId);
-//                statement.setDouble(3, payment.getAmount());
-                statement.setDouble(3, Integer.parseInt(amount));
-//                statement.setTimestamp(4, Timestamp.valueOf(payment.getTimestamp()));
-                statement.setTimestamp(4, Timestamp.valueOf(LocalDateTime.now()));
+                statement.setDouble(3, Double.parseDouble(amountStr));
+                statement.setTimestamp(4, Timestamp.valueOf(LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS)));
+                statement.setTimestamp(5, Timestamp.valueOf(LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS)));
                 statement.executeUpdate();
             }
         }
-        logger.info("Successfully processed payment: [CCY=" + ccy + "|AMT=" + amount + "].");
+        logger.info("Successfully processed payment: [CCY=" + ccy + "|AMT=" + amountStr + "].");
     }
 }

@@ -45,13 +45,13 @@ public class PayTracker {
     public static final int REFRESH_TIME_IN_MILLIS = 60000; // refresh every minute as per the spec
     public static final int DEFAULT_MU_SERVER_PORT_NUMBER = 51234;
     public enum Status { RUNNABLE, RUNNING, TERMINATED };
-
     private final static Logger logger = LoggerFactory.getLogger(PayTracker.class);
 
     /**
      * PayTracker implementation servers
      */
     private static volatile MuServerBuilder webServerImpl;
+    private static volatile MuServer muServer;
     private static volatile Server dbServerImpl;
     public static final ObjectMapper webObjectMapper = new ObjectMapper();
     public PayTracker.Status status = Status.RUNNABLE;
@@ -177,7 +177,7 @@ public class PayTracker {
                     // create builder - start server instance
                     muServerBuilder = PayTracker.MuServerBuilderInstance(executor);
                     registerHandlers(muServerBuilder);
-                    MuServer muServer = muServerBuilder.start();
+                    muServer = muServerBuilder.start();
                     muServerPool.add(muServer);
                     logger.info("MuServer started successfully at ['" + muServer.uri() + "']");
                     this.status = status.RUNNING;
@@ -279,7 +279,7 @@ public class PayTracker {
         builder.addHandler(Method.GET, "/paytracker/currencies", new CurrencyHandler(this));
         builder.addHandler(Method.GET, "/paytracker/payers", new PayerHandler(this));
         builder.addHandler(Method.GET, "/paytracker/payments", new PaymentHandler(this));
-        builder.addHandler(Method.GET, "/paytracker/payment/{currency}/{amount}",
+        builder.addHandler(Method.GET, "/paytracker/payment/{currency}/{amount}/{payer}",
                 new PaymentProcessorHandler(this));
     }
 
@@ -316,7 +316,7 @@ public class PayTracker {
          */
         int elapsedTime = 0;
         while (status.RUNNING == this.status) {
-
+            logger.info("Current MuServer connections: " + muServer.activeConnections().size());
             try {
                 DbHelper.refreshAggregatedPaymentCache(this.aggregatedPaymentCache);
             } catch (RuntimeException ex) {
