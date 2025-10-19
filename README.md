@@ -49,3 +49,18 @@ The project requires IntellJ Idea IDE to build and run.
     * Packaging of the app and the required command-line script can easily be provided by extending pom.xml
       and executing 'java -classpath <> .. *.jar' command.
     * The project is lacking unit testing due to time constraints.
+
+5/. H2 DATABASE
+
+PayTracker uses H2 database to store data. It creates H2 database 'paytracker.mv.db' in ${user.home}
+directory if such database does not exist. User can view the content of tables by logging to localhost:8082.
+When logging into database set:
+   5.1/. Saved Settings: Generic H2 (Embedded)
+   5.2/. Setting Name  : Generic H2 (Embedded)
+   5.3/. Driver Class  : org.h2.Driver
+   5.4/. User Name     : sa
+   5.5/. Password      : (empty)
+
+When PayTracker exists the H2 database remains on disk. When PayTracker starts again user can continue
+with all data from previous run safely stored in the existing database. PayTracker opens the existing
+database which is ready to be used.
