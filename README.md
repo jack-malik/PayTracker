@@ -5,7 +5,7 @@ HSBC PofC - by Jack Malik
 1/. PROJECT REQUIREMENTS
 
 The project is pom-based and requires access to Maven and Internet connection.
-The project requires IntellJ Idea IDE to build and run.
+For convenience the project has .idea project file to build and run.
 
 2/. PROJECT BUILD AND RUNNING
 
